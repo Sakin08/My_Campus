@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import generateToken from "../utils/generateToken.js";
 import cloudinary from "../config/cloudinary.js";
 
-// REGISTER
+// ────── REGISTER ──────
 export const registerUser = async (req, res) => {
   const { name, regNo, email, password, department, batch } = req.body;
 
@@ -40,12 +40,12 @@ export const registerUser = async (req, res) => {
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
-    console.error(error);
+    console.error("Register error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
-// LOGIN
+// ────── LOGIN ──────
 export const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
@@ -56,7 +56,7 @@ export const loginUser = async (req, res) => {
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
-    res.status(200).json({
+    res.json({
       _id: user._id,
       name: user.name,
       email: user.email,
@@ -68,23 +68,25 @@ export const loginUser = async (req, res) => {
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
-    console.error(error);
+    console.error("Login error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
-// GET ME
+// ────── GET ME ──────
 export const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
     res.json({ user });
   } catch (err) {
-    console.error(err);
+    console.error("GetMe error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
 
-// UPDATE PROFILE WITH CLOUDINARY
+// ────── UPDATE PROFILE (CLOUDINARY) ──────
+// backend/controllers/authController.js (only updateProfile part)
+
 export const updateProfile = async (req, res) => {
   const { name, email, department, batch, currentPassword, newPassword, avatar } = req.body;
 
@@ -102,37 +104,45 @@ export const updateProfile = async (req, res) => {
     if (department) user.department = department;
     if (batch) user.batch = batch;
 
-    // Upload avatar to Cloudinary
-    if (avatar) {
-      // Delete old avatar if exists
+    // ────── AVATAR UPLOAD (SAFE) ──────
+    if (avatar && avatar.startsWith("data:image")) {
+      console.log("Avatar upload started...");
+
+      // Delete old
       if (user.avatar) {
         try {
           const publicId = user.avatar.split("/").pop().split(".")[0];
           await cloudinary.uploader.destroy(publicId);
-        } catch (err) {
-          console.log("Old avatar delete failed:", err);
+          console.log("Old avatar deleted:", publicId);
+        } catch (e) {
+          console.warn("Failed to delete old avatar:", e.message);
         }
       }
 
-      // Upload new avatar
-      const result = await cloudinary.uploader.upload(avatar, {
-        folder: "campus-hub/avatars",
-        width: 300,
-        height: 300,
-        crop: "fill",
-        quality: "auto",
-        format: "webp", // Modern format
-      });
-
-      user.avatar = result.secure_url;
+      // Upload new
+      try {
+        const result = await cloudinary.uploader.upload(avatar, {
+          folder: "campus-hub/avatars",
+          width: 300,
+          height: 300,
+          crop: "fill",
+          quality: "auto",
+          format: "webp",
+        });
+        console.log("Uploaded to Cloudinary:", result.secure_url);
+        user.avatar = result.secure_url;
+      } catch (uploadErr) {
+        console.error("Cloudinary Upload FAILED:", uploadErr);
+        return res.status(500).json({ message: "Image upload failed" });
+      }
     }
 
-    // Change password
+    // ────── PASSWORD ──────
     if (currentPassword && newPassword) {
       const isMatch = await user.comparePassword(currentPassword);
       if (!isMatch) return res.status(400).json({ message: "Current password incorrect" });
       if (newPassword.length < 6) return res.status(400).json({ message: "Password too short" });
-      
+
       const salt = await bcrypt.genSalt(10);
       user.password = await bcrypt.hash(newPassword, salt);
     }
@@ -154,7 +164,7 @@ export const updateProfile = async (req, res) => {
       token,
     });
   } catch (error) {
-    console.error("Update Error:", error);
+    console.error("UpdateProfile CRASH:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
